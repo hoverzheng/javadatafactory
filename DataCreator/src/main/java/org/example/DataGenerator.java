@@ -10,12 +10,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-
 public class DataGenerator {
     private static final Faker faker = new Faker(Locale.CHINA);
     private static final AtomicInteger idCounter = new AtomicInteger(1); // 自增ID计数器
-    public static String generateData(String fields, int rowCount, String delimiter) {
+
+    public static void generateDataInBatches(String fields, int rowCount, String delimiter, int threadId, int batchSize) {
         String[] fieldArray = fields.split(",");
+        int fullBatches = rowCount / batchSize;
+        int remainingRows = rowCount % batchSize;
+
+        for (int i = 0; i < fullBatches; i++) {
+            String data = generateData(fieldArray, batchSize, delimiter);
+            writeFile("data_file_" + threadId + ".txt", data);
+            System.out.printf("Thread %d: Finished writing batch %d/%d\n", threadId, i + 1, fullBatches);
+        }
+
+        if (remainingRows > 0) {
+            String data = generateData(fieldArray, remainingRows, delimiter);
+            writeFile("data_file_" + threadId + ".txt", data);
+            System.out.printf("Thread %d: Finished writing final batch\n", threadId);
+        }
+    }
+
+    private static String generateData(String[] fieldArray, int rowCount, String delimiter) {
         return IntStream.range(0, rowCount)
                 .mapToObj(i -> generateRow(fieldArray, delimiter))
                 .collect(Collectors.joining("\n"));
@@ -59,18 +76,18 @@ public class DataGenerator {
         }
     }
 
-    public static void generateFile(String fields, int rowCount, String delimiter, int threadId) {
-        String data = generateData(fields, rowCount, delimiter);
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter("data_file_" + threadId + ".txt"))) {
+    private static void writeFile(String fileName, String data) {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileName, true))) { // 文件追加模式
             writer.write(data);
+            writer.newLine();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
     public static void main(String[] args) {
-        if (args.length < 4) {
-            System.out.println("usage: java -jar DataGenerator.jar <fields> <rowCount> <delimiter> <threadCount>");
+        if (args.length < 5) {
+            System.out.println("usage: java -jar DataGenerator.jar <fields> <rowCount> <delimiter> <threadCount> <batchSize>");
             return;
         }
 
@@ -78,12 +95,12 @@ public class DataGenerator {
         int rowCount = Integer.parseInt(args[1]); // 行数
         String delimiter = args[2]; // 分隔符
         int threadCount = Integer.parseInt(args[3]); // 线程数
-
+        int batchSize = Integer.parseInt(args[4]); // 批次大小
 
         Thread[] threads = new Thread[threadCount];
         for (int i = 0; i < threadCount; i++) {
             final int threadId = i;
-            threads[i] = new Thread(() -> generateFile(fields, rowCount, delimiter, threadId));
+            threads[i] = new Thread(() -> generateDataInBatches(fields, rowCount, delimiter, threadId, batchSize));
             threads[i].start();
         }
 
